@@ -16,67 +16,69 @@ def ct_get(path, params=None):
     url = "https://api.cardtrader.com" + path
     return requests.get(url, headers=headers, params=params, timeout=30)
 
-def short_snip(obj, limit=900):
-    s = str(obj)
-    return s[:limit] + ("..." if len(s) > limit else "")
+def pick_names(items, limit=5):
+    out = []
+    if isinstance(items, list):
+        for x in items[:limit]:
+            if isinstance(x, dict):
+                out.append(str(x.get("name", "")) + " | meta=" + str(x.get("meta_name","")))
+            else:
+                out.append(str(x))
+    return out
 
 def main():
-    # 1) JWT check
+    # JWT check
     r = ct_get("/api/v2/info")
     if r.status_code in (401, 403):
-        telegram_send("⚠️ <b>JWT caducado</b>. Actualiza el secreto <b>CARDTRADER_JWT</b>.")
+        telegram_send("⚠️ <b>JWT caducado</b>. Actualiza <b>CARDTRADER_JWT</b>.")
         sys.exit(1)
     r.raise_for_status()
 
-    # 2) Confirm MTG id
-    r = ct_get("/api/v2/games")
-    r.raise_for_status()
-    games = r.json()
-    mtg_id = None
-    for g in games.get("array", []):
-        if str(g.get("name", "")).lower() == "magic":
-            mtg_id = g.get("id")
-            break
-    if mtg_id is None:
-        telegram_send("⚠️ No encontré MTG en /games.")
-        sys.exit(1)
+    game_id = 1
+    category_id = 1
 
-    # 3) Probar endpoints típicos (sin adivinar)
-    tests = [
-        ("/api/v2/categories", {"game_id": mtg_id}),
-        ("/api/v2/expansions", {"game_id": mtg_id}),
-        ("/api/v2/blueprints", {"game_id": mtg_id}),
-        ("/api/v2/blueprints/search", {"game_id": mtg_id, "q": "The One Ring"}),
-        ("/api/v2/products/search", {"game_id": mtg_id, "q": "The One Ring"}),
+    base_params = {"game_id": game_id, "category_id": category_id, "per_page": 50}
+
+    # Probamos varios nombres típicos de búsqueda
+    trials = [
+        ("q", "The One Ring"),
+        ("query", "The One Ring"),
+        ("search", "The One Ring"),
+        ("name", "The One Ring"),
+        ("translated_name", "The One Ring"),
+        ("meta_name", "the-one-ring"),
+        ("slug", "the-one-ring"),
     ]
 
     lines = []
-    lines.append("<b>✅ CardTrader OK</b>")
-    lines.append("MTG game_id: <code>" + str(mtg_id) + "</code>")
+    lines.append("<b>🔎 Test búsqueda en /api/v2/blueprints</b>")
+    lines.append("game_id=<code>1</code> category_id=<code>1</code>")
     lines.append("")
-    lines.append("<b>🔎 Test de endpoints</b>")
 
-    for path, params in tests:
-        try:
-            rr = ct_get(path, params=params)
-            status = rr.status_code
-            txt = ""
-            js = None
-            if status == 200:
-                try:
-                    js = rr.json()
-                    txt = short_snip(js)
-                except Exception:
-                    txt = short_snip(rr.text)
-            else:
-                txt = short_snip(rr.text)
-            lines.append("")
-            lines.append("<b>" + path + "</b>  →  <code>" + str(status) + "</code>")
-            lines.append("<code>" + txt.replace("<", "&lt;").replace(">", "&gt;") + "</code>")
-        except Exception as e:
-            lines.append("")
-            lines.append("<b>" + path + "</b>  →  <code>EXCEPTION</code>")
-            lines.append("<code>" + short_snip(str(e)).replace("<", "&lt;").replace(">", "&gt;") + "</code>")
+    for key, value in trials:
+        params = dict(base_params)
+        params[key] = value
+
+        rr = ct_get("/api/v2/blueprints", params=params)
+        status = rr.status_code
+
+        if status != 200:
+            lines.append(f"<b>{key}=...</b> → <code>{status}</code>")
+            continue
+
+        data = rr.json()
+        n = len(data) if isinstance(data, list) else 0
+        sample = pick_names(data, limit=3)
+
+        # Heurística: si filtra, debería devolver menos que 50 y contener 'ring' en alguno
+        contains = any(("ring" in s.lower()) for s in sample)
+
+        lines.append(f"<b>{key}={value}</b> → <code>200</code> | items=<code>{n}</code> | sample_ring=<code>{contains}</code>")
+        for s in sample:
+            # escapamos < >
+            s2 = s.replace("<","&lt;").replace(">","&gt;")
+            lines.append("<code>" + s2[:120] + "</code>")
+        lines.append("")
 
     msg = "\n".join(lines)
     if len(msg) > 3500:
