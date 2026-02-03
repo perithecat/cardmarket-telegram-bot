@@ -1,0 +1,29 @@
+name: CardTrader JWT Daily
+
+on:
+  schedule:
+    - cron: "0 8 * * *"   # Todos los días a las 08:00 UTC (~09:00 España)
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Ejecutar el bot
+        run: python main.py
+        env:
+          CARDTRADER_JWT: ${{ secrets.CARDTRADER_JWT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
