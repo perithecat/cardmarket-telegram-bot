@@ -40,29 +40,24 @@ def main():
         sys.exit(1)
     r.raise_for_status()
 
-    games = r.json()
+games = r.json()
 
-    # 3) Buscar Magic (simple, sin ponernos finos con idiomas)
-    # games suele ser una lista de objetos con campos tipo id, name, slug
-    magic = None
-    for g in games:
-        name = (g.get("name") or "").lower()
-        slug = (g.get("slug") or "").lower()
-        if "magic" in name or "magic" in slug:
-            magic = g
-            break
+magic = None
+for g in games:
+    if isinstance(g, str) and "magic" in g.lower():
+        magic = g
+        break
 
     if not magic:
-        telegram_send("✅ Conexión OK, pero no encontré 'Magic' en /games.")
-        return
+    telegram_send("✅ Conexión OK, pero no encontré 'Magic' en /games.")
+    return
 
-    msg = (
-        "<b>✅ CardTrader API OK</b>\n\n"
-        f"Juego detectado: <b>{magic.get('name')}</b>\n"
-        f"id: <code>{magic.get('id')}</code>\n"
-        f"slug: <code>{magic.get('slug')}</code>"
-    )
-    telegram_send(msg)
+msg = (
+    "<b>✅ CardTrader API OK</b>\n\n"
+    f"Juego detectado: <b>{magic}</b>"
+)
+telegram_send(msg)
+
 
 if __name__ == "__main__":
     main()
