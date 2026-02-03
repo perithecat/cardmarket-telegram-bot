@@ -16,6 +16,11 @@ def ct_get(path, params=None):
     url = "https://api.cardtrader.com" + path
     return requests.get(url, headers=headers, params=params, timeout=30)
 
+def snip(x, n=700):
+    s = str(x)
+    s = s.replace("<","&lt;").replace(">","&gt;")
+    return s[:n] + ("..." if len(s) > n else "")
+
 def main():
     # JWT check
     r = ct_get("/api/v2/info")
@@ -24,31 +29,37 @@ def main():
         sys.exit(1)
     r.raise_for_status()
 
-    # Buscar blueprints por nombre (MTG = 1, Single Cards = 1)
-    params = {"game_id": 1, "category_id": 1, "name": "The One Ring", "per_page": 50}
-    r = ct_get("/api/v2/blueprints", params=params)
-    r.raise_for_status()
-    items = r.json()
+    blueprint_id = 240264
 
-    if not isinstance(items, list) or not items:
-        telegram_send("⚠️ No encontré resultados para The One Ring.")
-        return
+    tests = [
+        (f"/api/v2/blueprints/{blueprint_id}", None),
+        (f"/api/v2/blueprints/{blueprint_id}/products", None),
+        (f"/api/v2/blueprints/{blueprint_id}/listings", None),
+        (f"/api/v2/blueprints/{blueprint_id}/offers", None),
+        (f"/api/v2/products", {"blueprint_id": blueprint_id, "per_page": 20}),
+        (f"/api/v2/listings", {"blueprint_id": blueprint_id, "per_page": 20}),
+        (f"/api/v2/offers", {"blueprint_id": blueprint_id, "per_page": 20}),
+        (f"/api/v2/marketplace/products", {"blueprint_id": blueprint_id, "per_page": 20}),
+        (f"/api/v2/marketplace/listings", {"blueprint_id": blueprint_id, "per_page": 20}),
+    ]
 
     lines = []
-    lines.append("<b>🧾 The One Ring — blueprints encontrados</b>")
-    lines.append("(elige cuál usar para precios)")
+    lines.append("<b>🔎 Test listings/precios</b>")
+    lines.append(f"blueprint_id=<code>{blueprint_id}</code>")
     lines.append("")
 
-    for i, b in enumerate(items, 1):
-        bid = str(b.get("id", ""))
-        name = str(b.get("name", ""))
-        exp = str(b.get("expansion_id", ""))
-        slug = str(b.get("slug", ""))
-        meta = str(b.get("meta_name", ""))
-        lines.append(f"{i}) id=<code>{bid}</code> exp=<code>{exp}</code>")
-        lines.append(f"   <b>{name}</b>")
-        lines.append(f"   meta=<code>{meta}</code>")
-        lines.append(f"   slug=<code>{slug}</code>")
+    for path, params in tests:
+        rr = ct_get(path, params=params)
+        status = rr.status_code
+        lines.append(f"<b>{path}</b> → <code>{status}</code>")
+        if status == 200:
+            try:
+                js = rr.json()
+                lines.append("<code>" + snip(js) + "</code>")
+            except Exception:
+                lines.append("<code>" + snip(rr.text) + "</code>")
+        else:
+            lines.append("<code>" + snip(rr.text) + "</code>")
         lines.append("")
 
     msg = "\n".join(lines)
