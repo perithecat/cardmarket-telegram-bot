@@ -16,9 +16,6 @@ def ct_get(path, params=None):
     url = "https://api.cardtrader.com" + path
     return requests.get(url, headers=headers, params=params, timeout=30)
 
-def safe(s, n=120):
-    return str(s).replace("<","&lt;").replace(">","&gt;")[:n]
-
 def main():
     # JWT check
     r = ct_get("/api/v2/info")
@@ -27,62 +24,31 @@ def main():
         sys.exit(1)
     r.raise_for_status()
 
-    game_id = 1
-    category_id = 1
-    needle = "The One Ring"
+    # Buscar blueprints por nombre (MTG = 1, Single Cards = 1)
+    params = {"game_id": 1, "category_id": 1, "name": "The One Ring", "per_page": 50}
+    r = ct_get("/api/v2/blueprints", params=params)
+    r.raise_for_status()
+    items = r.json()
 
-    base = {"game_id": game_id, "category_id": category_id, "per_page": 100}
-
-    trials = [
-        ({"q": needle}, "q"),
-        ({"query": needle}, "query"),
-        ({"search": needle}, "search"),
-        ({"name": needle}, "name"),
-        ({"filter[name]": needle}, "filter[name]"),
-        ({"filter[display_name]": needle}, "filter[display_name]"),
-        ({"filter[meta_name]": "the-one-ring"}, "filter[meta_name]"),
-        ({"filter[search]": needle}, "filter[search]"),
-        ({"q[name_cont]": needle}, "q[name_cont]"),
-        ({"q[name_i_cont]": needle}, "q[name_i_cont]"),
-        ({"q[translated_name_cont]": needle}, "q[translated_name_cont]"),
-        ({"q[meta_name_cont]": "one-ring"}, "q[meta_name_cont]"),
-        ({"q[slug_cont]": "one-ring"}, "q[slug_cont]"),
-    ]
+    if not isinstance(items, list) or not items:
+        telegram_send("⚠️ No encontré resultados para The One Ring.")
+        return
 
     lines = []
-    lines.append("<b>🔎 Buscar blueprint en /api/v2/blueprints</b>")
-    lines.append("Objetivo: <code>The One Ring</code>")
+    lines.append("<b>🧾 The One Ring — blueprints encontrados</b>")
+    lines.append("(elige cuál usar para precios)")
     lines.append("")
 
-    for extra_params, label in trials:
-        params = dict(base)
-        params.update(extra_params)
-
-        rr = ct_get("/api/v2/blueprints", params=params)
-        status = rr.status_code
-
-        if status != 200:
-            lines.append(f"<b>{label}</b> → <code>{status}</code>")
-            continue
-
-        data = rr.json()
-        if not isinstance(data, list):
-            lines.append(f"<b>{label}</b> → <code>200</code> pero respuesta no-lista: <code>{safe(data, 120)}</code>")
-            continue
-
-        # Contar coincidencias dentro del lote
-        names = [str(x.get("name","")) for x in data if isinstance(x, dict)]
-        hits = [n for n in names if "ring" in n.lower()]
-
-        first = data[0] if data else {}
-        first_name = first.get("name","") if isinstance(first, dict) else str(first)
-
-        lines.append(f"<b>{label}</b> → <code>200</code> | items=<code>{len(data)}</code> | ring_hits=<code>{len(hits)}</code>")
-        lines.append("<code>first: " + safe(first_name, 80) + "</code>")
-        if hits:
-            # enseñamos las 3 primeras coincidencias
-            for h in hits[:3]:
-                lines.append("<code>hit: " + safe(h, 80) + "</code>")
+    for i, b in enumerate(items, 1):
+        bid = str(b.get("id", ""))
+        name = str(b.get("name", ""))
+        exp = str(b.get("expansion_id", ""))
+        slug = str(b.get("slug", ""))
+        meta = str(b.get("meta_name", ""))
+        lines.append(f"{i}) id=<code>{bid}</code> exp=<code>{exp}</code>")
+        lines.append(f"   <b>{name}</b>")
+        lines.append(f"   meta=<code>{meta}</code>")
+        lines.append(f"   slug=<code>{slug}</code>")
         lines.append("")
 
     msg = "\n".join(lines)
