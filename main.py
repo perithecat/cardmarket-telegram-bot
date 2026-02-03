@@ -3,11 +3,11 @@ import requests
 import sys
 
 
-def telegram_send(text: str):
+def telegram_send(text):
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
 
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    url = "https://api.telegram.org/bot" + token + "/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": text,
@@ -19,113 +19,75 @@ def telegram_send(text: str):
     r.raise_for_status()
 
 
-def cardtrader_get(path: str, params=None):
+def cardtrader_get(path):
     jwt = os.environ["CARDTRADER_JWT"].strip()
-    headers = {"Authorization": f"Bearer {jwt}"}
-    url = f"https://api.cardtrader.com{path}"
-
-    r = requests.get(url, headers=headers, params=params, timeout=30)
-    return r
-
-
-def detect_magic(games_json):
-    """
-    Intenta encontrar Magic en la respuesta de /games,
-    sea lista de strings o lista de dicts.
-    """
-    if isinstance(games_json, list):
-        for g in games_json:
-            # Caso 1: lista de strings
-            if isinstance(g, str) and "magic" in g.lower():
-                return g
-
-            # Caso 2: lista de dicts
-            if isinstance(g, dict):
-                name = str(g.get("name", "")).lower()
-                slug = str(g.get("slug", "")).lower()
-                if "magic" in name or "magic" in slug:
-                    return g
-
-    # Si no encaja con nada
-    return None
+    headers = {"Authorization": "Bearer " + jwt}
+    url = "https://api.cardtrader.com" + path
+    return requests.get(url, headers=headers, timeout=30)
 
 
 def main():
-    # 1) Health check JWT
+    # 1) Check JWT
     r = cardtrader_get("/api/v2/info")
-
     if r.status_code in (401, 403):
         telegram_send(
-            "⚠️ <b>CardTrader JWT caducado o sin permisos</b>\n\n"
-            "Solución:\n"
-            "1) CardTrader → Token JWT → copiar token nuevo\n"
-            "2) GitHub → Settings → Secrets → actualizar <b>CARDTRADER_JWT</b>\n\n"
-            f"HTTP: {r.status_code}"
+            "⚠️ <b>JWT caducado o sin permisos</b>\n"
+            "Entra en CardTrader → Token JWT → copia uno nuevo\n"
+            "y actualiza el secreto <b>CARDTRADER_JWT</b> en GitHub."
         )
         sys.exit(1)
+    r.raise_for_status()
 
-    try:
-        r.raise_for_status()
-    except Exception:
-        telegram_send(
-            "⚠️ <b>Error llamando a /info</b>\n\n"
-            f"HTTP: {r.status_code}\n"
-            f"Respuesta: <code>{(r.text or '')[:300]}</code>"
-        )
-        sys.exit(1)
-
-    # 2) Pedir /games
+    # 2) Games
     r = cardtrader_get("/api/v2/games")
-
     if r.status_code in (401, 403):
-        telegram_send(
-            "⚠️ <b>JWT sin permisos para /games</b>\n\n"
-            f"HTTP: {r.status_code}\n"
-            "Copia un JWT nuevo y actualiza <b>CARDTRADER_JWT</b>."
-        )
+        telegram_send("⚠️ <b>Sin permisos</b> para /games (401/403).")
         sys.exit(1)
-
-    try:
-        r.raise_for_status()
-    except Exception:
-        telegram_send(
-            "⚠️ <b>Error llamando a /games</b>\n\n"
-            f"HTTP: {r.status_code}\n"
-            f"Respuesta: <code>{(r.text or '')[:300]}</code>"
-        )
-        sys.exit(1)
+    r.raise_for_status()
 
     games = r.json()
 
-    # 3) Detectar Magic si se puede
-    magic = detect_magic(games)
+    # 3) Detect magic
+    magic_found = None
+    if isinstance(games, list):
+        for g in games:
+            if isinstance(g, str) and ("magic" in g.lower()):
+                magic_found = g
+                break
+            if isinstance(g, dict):
+                name = str(g.get("name", "")).lower()
+                slug = str(g.get("slug", "")).lower()
+                if ("magic" in name) or ("magic" in slug):
+                    magic_found = g
+                    break
 
-    # 4) Mandar a Telegram un resumen (y parte del payload para debug)
-    snippet = str(games)[:900]  # recorte para no pasarnos de tamaño
+    snippet = str(games)[:900]
 
-    if magic is None:
-        telegram_send(
-            "✅ <b>Conexión OK</b>\n"
-            "Pero no encontré 'Magic' en /games.\n\n"
-            "<b>Primeros datos (recorte):</b>\n"
-            f"<code>{snippet}</code>"
-        )
+    if magic_found is None:
+        msg = "✅ <b>Conexión OK</b>\nNo encuentro 'Magic' en /games.\n\n<code>" + snippet + "</code>"
+        telegram_send(msg)
         return
 
-    # Si magic es dict, formatea; si es string, lo manda tal cual
-    if isinstance(magic, dict):
-        name = magic.get("name", "Magic")
-        mid = magic.get("id", "¿?")
-        slug = magic.get("slug", "")
-        telegram_send(
+    if isinstance(magic_found, dict):
+        name = str(magic_found.get("name", "Magic"))
+        mid = str(magic_found.get("id", ""))
+        slug = str(magic_found.get("slug", ""))
+        msg = (
             "✅ <b>CardTrader API OK</b>\n\n"
-            f"Juego detectado: <b>{name}</b>\n"
-            f"id: <code>{mid}</code>\n"
-            f"slug: <code>{slug}</code>\n\n"
-            "<b>Recorte /games:</b>\n"
-            f"<code>{snippet}</code>"
+            "Juego detectado: <b>" + name + "</b>\n"
+            "id: <code>" + mid + "</code>\n"
+            "slug: <code>" + slug + "</code>\n\n"
+            "<code>" + snippet + "</code>"
         )
+        telegram_send(msg)
     else:
-        telegram_send(
+        msg = (
             "✅ <b>CardTrader API OK</b>\n\n"
-            f"Juego detectad
+            "Juego detectado: <b>" + str(magic_found) + "</b>\n\n"
+            "<code>" + snippet + "</code>"
+        )
+        telegram_send(msg)
+
+
+if __name__ == "__main__":
+    main()
