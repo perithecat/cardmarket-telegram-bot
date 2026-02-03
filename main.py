@@ -16,15 +16,8 @@ def ct_get(path, params=None):
     url = "https://api.cardtrader.com" + path
     return requests.get(url, headers=headers, params=params, timeout=30)
 
-def pick_names(items, limit=5):
-    out = []
-    if isinstance(items, list):
-        for x in items[:limit]:
-            if isinstance(x, dict):
-                out.append(str(x.get("name", "")) + " | meta=" + str(x.get("meta_name","")))
-            else:
-                out.append(str(x))
-    return out
+def safe(s, n=120):
+    return str(s).replace("<","&lt;").replace(">","&gt;")[:n]
 
 def main():
     # JWT check
@@ -36,48 +29,60 @@ def main():
 
     game_id = 1
     category_id = 1
+    needle = "The One Ring"
 
-    base_params = {"game_id": game_id, "category_id": category_id, "per_page": 50}
+    base = {"game_id": game_id, "category_id": category_id, "per_page": 100}
 
-    # Probamos varios nombres típicos de búsqueda
     trials = [
-        ("q", "The One Ring"),
-        ("query", "The One Ring"),
-        ("search", "The One Ring"),
-        ("name", "The One Ring"),
-        ("translated_name", "The One Ring"),
-        ("meta_name", "the-one-ring"),
-        ("slug", "the-one-ring"),
+        ({"q": needle}, "q"),
+        ({"query": needle}, "query"),
+        ({"search": needle}, "search"),
+        ({"name": needle}, "name"),
+        ({"filter[name]": needle}, "filter[name]"),
+        ({"filter[display_name]": needle}, "filter[display_name]"),
+        ({"filter[meta_name]": "the-one-ring"}, "filter[meta_name]"),
+        ({"filter[search]": needle}, "filter[search]"),
+        ({"q[name_cont]": needle}, "q[name_cont]"),
+        ({"q[name_i_cont]": needle}, "q[name_i_cont]"),
+        ({"q[translated_name_cont]": needle}, "q[translated_name_cont]"),
+        ({"q[meta_name_cont]": "one-ring"}, "q[meta_name_cont]"),
+        ({"q[slug_cont]": "one-ring"}, "q[slug_cont]"),
     ]
 
     lines = []
-    lines.append("<b>🔎 Test búsqueda en /api/v2/blueprints</b>")
-    lines.append("game_id=<code>1</code> category_id=<code>1</code>")
+    lines.append("<b>🔎 Buscar blueprint en /api/v2/blueprints</b>")
+    lines.append("Objetivo: <code>The One Ring</code>")
     lines.append("")
 
-    for key, value in trials:
-        params = dict(base_params)
-        params[key] = value
+    for extra_params, label in trials:
+        params = dict(base)
+        params.update(extra_params)
 
         rr = ct_get("/api/v2/blueprints", params=params)
         status = rr.status_code
 
         if status != 200:
-            lines.append(f"<b>{key}=...</b> → <code>{status}</code>")
+            lines.append(f"<b>{label}</b> → <code>{status}</code>")
             continue
 
         data = rr.json()
-        n = len(data) if isinstance(data, list) else 0
-        sample = pick_names(data, limit=3)
+        if not isinstance(data, list):
+            lines.append(f"<b>{label}</b> → <code>200</code> pero respuesta no-lista: <code>{safe(data, 120)}</code>")
+            continue
 
-        # Heurística: si filtra, debería devolver menos que 50 y contener 'ring' en alguno
-        contains = any(("ring" in s.lower()) for s in sample)
+        # Contar coincidencias dentro del lote
+        names = [str(x.get("name","")) for x in data if isinstance(x, dict)]
+        hits = [n for n in names if "ring" in n.lower()]
 
-        lines.append(f"<b>{key}={value}</b> → <code>200</code> | items=<code>{n}</code> | sample_ring=<code>{contains}</code>")
-        for s in sample:
-            # escapamos < >
-            s2 = s.replace("<","&lt;").replace(">","&gt;")
-            lines.append("<code>" + s2[:120] + "</code>")
+        first = data[0] if data else {}
+        first_name = first.get("name","") if isinstance(first, dict) else str(first)
+
+        lines.append(f"<b>{label}</b> → <code>200</code> | items=<code>{len(data)}</code> | ring_hits=<code>{len(hits)}</code>")
+        lines.append("<code>first: " + safe(first_name, 80) + "</code>")
+        if hits:
+            # enseñamos las 3 primeras coincidencias
+            for h in hits[:3]:
+                lines.append("<code>hit: " + safe(h, 80) + "</code>")
         lines.append("")
 
     msg = "\n".join(lines)
