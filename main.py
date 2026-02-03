@@ -15,33 +15,54 @@ def telegram_send(text: str):
     r = requests.post(url, data=payload, timeout=30)
     r.raise_for_status()
 
-def cardtrader_get(path: str):
+def cardtrader_get(path: str, params=None):
     jwt = os.environ["CARDTRADER_JWT"].strip()
     headers = {"Authorization": f"Bearer {jwt}"}
     url = f"https://api.cardtrader.com{path}"
-    r = requests.get(url, headers=headers, timeout=30)
+    r = requests.get(url, headers=headers, params=params, timeout=30)
     return r
 
 def main():
-    # 1) Health check (para saber si el JWT sirve)
+    # 1) Check JWT
     r = cardtrader_get("/api/v2/info")
-
     if r.status_code in (401, 403):
         telegram_send(
-            "⚠️ <b>CardTrader JWT caducado o sin permisos</b>\n\n"
-            "El bot no puede renovar el token automáticamente.\n"
-            "Solución: entra en CardTrader → Token JWT → copia uno nuevo y "
-            "actualiza el secreto <b>CARDTRADER_JWT</b> en GitHub.\n\n"
-            f"Error: {r.status_code}"
+            "⚠️ <b>JWT caducado</b>\n"
+            "Copia uno nuevo en CardTrader y actualiza el secreto <b>CARDTRADER_JWT</b>."
         )
-        # Salimos con error para que quede claro en Actions
         sys.exit(1)
-
     r.raise_for_status()
 
-    # 2) Si llega aquí, el JWT está OK
-    telegram_send("✅ CardTrader JWT OK. Bot activo y listo para pedir datos.")
-    # Aquí ya enganchamos el siguiente paso: buscar cartas/listings y mandar ranking.
+    # 2) Traer lista de juegos
+    r = cardtrader_get("/api/v2/games")
+    if r.status_code in (401, 403):
+        telegram_send("⚠️ <b>JWT sin permisos</b> para /games (401/403).")
+        sys.exit(1)
+    r.raise_for_status()
+
+    games = r.json()
+
+    # 3) Buscar Magic (simple, sin ponernos finos con idiomas)
+    # games suele ser una lista de objetos con campos tipo id, name, slug
+    magic = None
+    for g in games:
+        name = (g.get("name") or "").lower()
+        slug = (g.get("slug") or "").lower()
+        if "magic" in name or "magic" in slug:
+            magic = g
+            break
+
+    if not magic:
+        telegram_send("✅ Conexión OK, pero no encontré 'Magic' en /games.")
+        return
+
+    msg = (
+        "<b>✅ CardTrader API OK</b>\n\n"
+        f"Juego detectado: <b>{magic.get('name')}</b>\n"
+        f"id: <code>{magic.get('id')}</code>\n"
+        f"slug: <code>{magic.get('slug')}</code>"
+    )
+    telegram_send(msg)
 
 if __name__ == "__main__":
     main()
